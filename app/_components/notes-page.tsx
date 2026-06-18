@@ -427,11 +427,12 @@ export function NotesPage() {
       return;
     }
 
+    const userId = user.id;
     let isMounted = true;
 
     async function loadNotes() {
       setIsLoadingNotes(true);
-      const { data, error } = await fetchTastingNotes(user.id);
+      const { data, error } = await fetchTastingNotes(userId);
 
       if (!isMounted) {
         return;
@@ -635,6 +636,8 @@ export function NotesPage() {
       return;
     }
 
+    const userId = user.id;
+
     if (!selectedWine) {
       setMessage("카탈로그에서 와인을 먼저 선택해주세요.");
       return;
@@ -648,7 +651,7 @@ export function NotesPage() {
       noteTags,
       appearanceColor,
     });
-    const { error } = await insertTastingNote(user.id, payload);
+    const { error } = await insertTastingNote(userId, payload);
 
     if (error) {
       setMessage(error.message);
@@ -656,7 +659,7 @@ export function NotesPage() {
       return;
     }
 
-    const refreshed = await fetchTastingNotes(user.id);
+    const refreshed = await fetchTastingNotes(userId);
 
     if (refreshed.error) {
       setMessage(refreshed.error.message);
@@ -677,6 +680,8 @@ export function NotesPage() {
       return;
     }
 
+    const userId = user.id;
+
     const shouldDelete = window.confirm(
       `"${note.name}" 노트를 삭제할까요? 이 작업은 되돌릴 수 없어요.`,
     );
@@ -688,7 +693,7 @@ export function NotesPage() {
     setDeletingNoteId(note.id);
     setMessage("");
 
-    const { error } = await deleteTastingNote(user.id, note.id);
+    const { error } = await deleteTastingNote(userId, note.id);
 
     if (error) {
       setMessage(error.message);

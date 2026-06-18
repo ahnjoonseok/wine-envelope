@@ -97,7 +97,7 @@ export async function fetchWineCatalog(query = "", limit = 60) {
   const { data, error } = await request;
 
   return {
-    data: (data ?? []) as WineCatalogEntry[],
+    data: (data ?? []) as unknown as WineCatalogEntry[],
     error,
   };
 }

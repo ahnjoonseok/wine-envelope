@@ -84,6 +84,27 @@ function getSavedNoteMeta(note: TastingNote) {
   );
 }
 
+function getNoteSearchText(note: TastingNote) {
+  const tags = parseTastingNoteTags(note.note_tags);
+
+  return [
+    note.name,
+    note.vintage,
+    note.region,
+    note.grape,
+    note.memo,
+    note.catalog_source,
+    note.catalog_external_id,
+    note.rating !== null ? String(note.rating) : null,
+    ...tags.aroma,
+    ...tags.palate,
+    ...tags.finish,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function getEnvelopeSummary(envelope: TastingEnvelope) {
   return [
     {
@@ -294,7 +315,7 @@ function SavedNoteCard({
                     key={item.key}
                     className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
                       activePanel === item.key
-                        ? "bg-neutral-900 text-white"
+                        ? "bg-neutral-900 !text-white"
                         : "text-neutral-600 hover:bg-white"
                     }`}
                     onClick={() => setActivePanel(item.key as SavedNotePanel)}
@@ -359,16 +380,6 @@ function SavedNoteCard({
             ))}
           </div>
 
-          <div className="mt-5 rounded-[1.25rem] border border-black/8 bg-white p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">
-              Stack Layout
-            </p>
-            <p className="mt-2 text-sm leading-6 text-neutral-600">
-              노트 탭에서는 아로마, 팔레트, 피니시를 가로축처럼 두고 각 섹션
-              태그가 위로 한 칸씩 쌓이도록 정리했습니다.
-            </p>
-          </div>
-
           {(note.rating !== null || note.memo) && (
             <div className="mt-5 rounded-[1.25rem] border border-black/8 bg-white p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">
@@ -400,6 +411,7 @@ export function NotesPage() {
   const [isLoadingNotes, setIsLoadingNotes] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [noteQuery, setNoteQuery] = useState("");
 
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogResults, setCatalogResults] = useState<WineCatalogEntry[]>([]);
@@ -417,9 +429,18 @@ export function NotesPage() {
   const [tagInputs, setTagInputs] = useState<TagInputMap>(createEmptyTagInputs());
 
   const deferredCatalogQuery = useDeferredValue(catalogQuery);
+  const deferredNoteQuery = useDeferredValue(noteQuery);
   const normalizedCatalogQuery = deferredCatalogQuery.trim();
+  const normalizedNoteQuery = deferredNoteQuery.trim().toLowerCase();
   const selectedLabel = selectedWine ? getCatalogSelectionLabel(selectedWine) : "";
   const noteCountLabel = `${notes.length}개의 기록`;
+  const filteredNotes = notes.filter((note) => {
+    if (!normalizedNoteQuery) {
+      return true;
+    }
+
+    return getNoteSearchText(note).includes(normalizedNoteQuery);
+  });
 
   useEffect(() => {
     if (!user) {
@@ -728,9 +749,6 @@ export function NotesPage() {
       <main className="mx-auto max-w-6xl px-6 py-12">
         <section className="grid gap-6 lg:grid-cols-[1fr_0.85fr]">
           <article className="rounded-[2rem] border border-black/8 bg-white p-8 shadow-[0_16px_48px_rgba(15,23,42,0.06)]">
-            <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">
-              Private Notes
-            </p>
             <h2 className="mt-4 text-4xl font-semibold tracking-tight text-neutral-950">
               여기는 내 와인 기록 공간이에요
             </h2>
@@ -761,86 +779,39 @@ export function NotesPage() {
   return (
     <>
       <main className="mx-auto max-w-6xl px-6 py-12">
-        <section className="rounded-[2rem] border border-black/8 bg-white p-8 shadow-[0_16px_48px_rgba(15,23,42,0.06)]">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl space-y-4">
-              <p className="text-xs uppercase tracking-[0.28em] text-neutral-500">
-                Private Notes
-              </p>
-              <h1 className="text-4xl font-semibold tracking-tight text-neutral-950 sm:text-5xl">
-                기록은 팝업에서 남기고,
-                <br />
-                지난 노트는 카드 안에서 전환해봅니다.
-              </h1>
-              <p className="text-base leading-7 text-neutral-600 sm:text-lg">
-                카탈로그에서 와인을 찾은 뒤 기록하기를 눌러 노트를 남기고,
-                아래 기록 카드 안에서 그래프와 노트를 같은 위치에서 바꿔가며
-                과거 기록을 살펴볼 수 있어요.
-              </p>
-            </div>
+        <section className="rounded-[1.5rem] border border-black/8 bg-white p-5 shadow-[0_16px_48px_rgba(15,23,42,0.06)] sm:p-6">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                className="rounded-xl bg-neutral-900 px-5 py-3 text-sm font-semibold !text-white transition hover:bg-neutral-800 hover:!text-white focus-visible:!text-white active:!text-white"
+                onClick={handleOpenComposer}
+                type="button"
+              >
+                기록하기
+              </button>
 
-            <div className="flex flex-col gap-3 lg:items-end">
               <div className="rounded-full border border-black/10 bg-neutral-50 px-4 py-2 text-sm text-neutral-600">
                 {noteCountLabel}
               </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800"
-                  onClick={handleOpenComposer}
-                  type="button"
-                >
-                  기록하기
-                </button>
 
-                <Link
-                  href="/discover"
-                  className="rounded-2xl border border-black/10 px-5 py-3 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-50"
-                >
-                  와인 정보 찾기
-                </Link>
-              </div>
+              {normalizedNoteQuery && (
+                <div className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-neutral-500">
+                  검색 결과 {filteredNotes.length}개
+                </div>
+              )}
             </div>
-          </div>
 
-          <div className="mt-8 grid gap-4 lg:grid-cols-3">
-            <article className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
-                기록 방식
-              </p>
-              <p className="mt-3 text-lg font-semibold text-neutral-950">
-                카탈로그 선택 후 팝업 저장
-              </p>
-              <p className="mt-2 text-sm leading-6 text-neutral-600">
-                수기 입력 대신 카탈로그에서 병을 고른 뒤 엔벨로프와 태그를
-                바로 쌓는 흐름으로 정리했습니다.
-              </p>
-            </article>
-
-            <article className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
-                보기 방식
-              </p>
-              <p className="mt-3 text-lg font-semibold text-neutral-950">
-                한 카드 안에서 그래프와 노트 전환
-              </p>
-              <p className="mt-2 text-sm leading-6 text-neutral-600">
-                왼쪽 패널 상단의 탭으로 그래프와 노트를 같은 자리에서 바꿔보는
-                구조로 정리했습니다.
-              </p>
-            </article>
-
-            <article className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-neutral-500">
-                현재 상태
-              </p>
-              <p className="mt-3 text-lg font-semibold text-neutral-950">
-                {noteCountLabel}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-neutral-600">
-                새 기록을 저장하면 모달이 닫히고, 아래 목록에 바로 추가되는
-                흐름으로 연결됩니다.
-              </p>
-            </article>
+            <label className="block w-full xl:max-w-md">
+              <span className="mb-2 block text-sm font-medium text-neutral-500">
+                내 기록 검색
+              </span>
+              <input
+                className="w-full rounded-xl border border-black/10 bg-neutral-50 px-4 py-3 text-sm text-neutral-950 outline-none placeholder:text-neutral-400 transition focus:border-neutral-400"
+                placeholder="와인 이름, 지역, 품종, 태그로 검색"
+                value={noteQuery}
+                onChange={(event) => setNoteQuery(event.target.value)}
+              />
+            </label>
           </div>
         </section>
 
@@ -851,17 +822,16 @@ export function NotesPage() {
         )}
 
         <section className="mt-8 rounded-[2rem] border border-black/8 bg-white p-8 shadow-[0_16px_48px_rgba(15,23,42,0.06)]">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                Saved Notes
-              </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
               <h2 className="text-3xl font-semibold text-neutral-950">
                 내가 남긴 와인 기록
               </h2>
-              <p className="text-sm leading-6 text-neutral-500">
-                각 기록 카드의 왼쪽 패널 탭에서 그래프와 노트를 전환해보세요.
-              </p>
+              {normalizedNoteQuery && (
+                <p className="mt-2 text-sm text-neutral-500">
+                  "{deferredNoteQuery.trim()}" 검색 결과예요.
+                </p>
+              )}
             </div>
           </div>
 
@@ -878,9 +848,16 @@ export function NotesPage() {
             </div>
           )}
 
-          {!isLoadingNotes && notes.length > 0 && (
+          {!isLoadingNotes && notes.length > 0 && filteredNotes.length === 0 && (
+            <div className="mt-6 rounded-[1.5rem] border border-dashed border-black/10 bg-neutral-50 p-6 text-sm leading-6 text-neutral-600">
+              검색어와 일치하는 기록이 없어요. 다른 이름이나 태그로 다시
+              찾아보세요.
+            </div>
+          )}
+
+          {!isLoadingNotes && filteredNotes.length > 0 && (
             <div className="mt-6 grid gap-4">
-              {notes.map((note) => (
+              {filteredNotes.map((note) => (
                 <SavedNoteCard
                   key={note.id}
                   deletingNoteId={deletingNoteId}
@@ -1126,7 +1103,7 @@ export function NotesPage() {
 
                     <div className="flex flex-wrap items-center gap-3 border-t border-black/8 pt-2">
                       <button
-                        className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold !text-white transition hover:bg-neutral-800 hover:!text-white focus-visible:!text-white active:!text-white disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={!selectedWine || isSaving}
                         type="submit"
                       >

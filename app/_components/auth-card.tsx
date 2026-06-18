@@ -81,7 +81,7 @@ export function AuthCard({ description, title }: AuthCardProps) {
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         <button
-          className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold !text-white transition hover:bg-neutral-800 hover:!text-white focus-visible:!text-white active:!text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={activeAction !== null}
           onClick={() => handleAuth("sign-up")}
           type="button"

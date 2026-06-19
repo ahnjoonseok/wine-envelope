@@ -3,8 +3,17 @@
 import Link from "next/link";
 import { useDeferredValue, useEffect, useState } from "react";
 import { AuthCard } from "@/app/_components/auth-card";
-import { TastingEnvelopeChart } from "@/app/_components/tasting-envelope-chart";
+import {
+  getTastingSectionAnchorPercentages,
+  TastingEnvelopeChart,
+} from "@/app/_components/tasting-envelope-chart";
 import { useAuthSession } from "@/app/_components/auth-provider";
+import {
+  getTastingTagCompactLabel,
+  getTastingTagEmoji,
+  getTastingTagStyle,
+  TASTING_TAG_SUGGESTIONS,
+} from "@/app/_lib/tasting-tags";
 import {
   deleteTastingNote,
   fetchTastingNotes,
@@ -17,9 +26,9 @@ import {
   createDefaultTastingEnvelope,
   createDefaultTastingNoteTags,
   formatNoteDate,
+  getAppearanceGradientColors,
   getCatalogKey,
   getCatalogMeta,
-  getCatalogReference,
   getCatalogSelectionLabel,
   getCatalogSuggestedAppearanceColor,
   getCatalogSubtitle,
@@ -40,18 +49,14 @@ const TASTING_SECTIONS = [
   {
     key: "aroma",
     title: "아로마",
-    description: "아로마가 얼마나 강했는지와 떠오른 향 노트를 남겨주세요.",
   },
   {
     key: "palate",
     title: "팔레트",
-    description: "입안에서의 밀도와 인상을 팔레트 태그로 기록해주세요.",
   },
   {
     key: "finish",
     title: "피니시",
-    description:
-      "피니시의 강도와 지속감을 envelope로 표시하고 태그도 덧붙여주세요.",
   },
 ] as const;
 
@@ -73,8 +78,25 @@ function normalizeTagTokens(value: string) {
     .filter(Boolean);
 }
 
-function formatRatioLabel(value: number) {
-  return `${Math.round(value * 100)}%`;
+function normalizeTagValue(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function hasMatchingTag(tags: string[], target: string) {
+  const normalizedTarget = normalizeTagValue(target);
+  return tags.some((tag) => normalizeTagValue(tag) === normalizedTarget);
+}
+
+function mergeUniqueTags(existingTags: string[], nextTags: string[]) {
+  const merged = [...existingTags];
+
+  nextTags.forEach((nextTag) => {
+    if (!hasMatchingTag(merged, nextTag)) {
+      merged.push(nextTag);
+    }
+  });
+
+  return merged;
 }
 
 function getSavedNoteMeta(note: TastingNote) {
@@ -93,9 +115,6 @@ function getNoteSearchText(note: TastingNote) {
     note.region,
     note.grape,
     note.memo,
-    note.catalog_source,
-    note.catalog_external_id,
-    note.rating !== null ? String(note.rating) : null,
     ...tags.aroma,
     ...tags.palate,
     ...tags.finish,
@@ -105,54 +124,32 @@ function getNoteSearchText(note: TastingNote) {
     .toLowerCase();
 }
 
-function getEnvelopeSummary(envelope: TastingEnvelope) {
-  return [
-    {
-      label: "아로마 강도",
-      value: formatRatioLabel(envelope.aroma.y),
-    },
-    {
-      label: "팔레트 강도",
-      value: formatRatioLabel(envelope.palate.y),
-    },
-    {
-      label: "피니시 길이",
-      value: formatRatioLabel(envelope.finish.x),
-    },
-    {
-      label: "피니시 강도",
-      value: formatRatioLabel(envelope.finish.y),
-    },
-  ];
-}
-
 type SectionTagEditorProps = {
-  description: string;
   inputValue: string;
   onAddTag: (section: TastingSectionKey) => void;
   onChangeInput: (section: TastingSectionKey, value: string) => void;
   onRemoveTag: (section: TastingSectionKey, tag: string) => void;
+  onToggleSuggestedTag: (section: TastingSectionKey, tag: string) => void;
   section: TastingSectionKey;
   tags: string[];
   title: string;
 };
 
 function SectionTagEditor({
-  description,
   inputValue,
   onAddTag,
   onChangeInput,
   onRemoveTag,
+  onToggleSuggestedTag,
   section,
   tags,
   title,
 }: SectionTagEditorProps) {
+  const suggestions = TASTING_TAG_SUGGESTIONS[section];
+
   return (
     <section className="rounded-[1.5rem] border border-black/8 bg-white p-5">
-      <div className="space-y-2">
-        <p className="text-sm font-semibold text-neutral-900">{title}</p>
-        <p className="text-sm leading-6 text-neutral-500">{description}</p>
-      </div>
+      <p className="text-sm font-semibold text-neutral-900">{title}</p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {tags.length === 0 && (
@@ -162,11 +159,12 @@ function SectionTagEditor({
         {tags.map((tag) => (
           <button
             key={`${section}-${tag}`}
-            className="rounded-full border border-black/10 bg-neutral-50 px-3 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-100"
+            className="rounded-full border px-3 py-1.5 text-sm transition hover:brightness-[0.98]"
             onClick={() => onRemoveTag(section, tag)}
+            style={getTastingTagStyle(tag, "selected")}
             type="button"
           >
-            {tag} x
+            {getTastingTagEmoji(tag)} {tag} x
           </button>
         ))}
       </div>
@@ -193,6 +191,38 @@ function SectionTagEditor({
           추가
         </button>
       </div>
+
+      <div className="mt-4">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-neutral-400">
+          추천 태그
+        </p>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          {suggestions.map((tag) => {
+            const isSelected = hasMatchingTag(tags, tag);
+
+            return (
+              <button
+                key={`${section}-suggestion-${tag}`}
+                aria-pressed={isSelected}
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                  isSelected
+                    ? "ring-1 ring-black/8"
+                    : "hover:-translate-y-px hover:brightness-[0.99]"
+                }`}
+                onClick={() => onToggleSuggestedTag(section, tag)}
+                style={getTastingTagStyle(
+                  tag,
+                  isSelected ? "selected" : "suggestion",
+                )}
+                type="button"
+              >
+                {getTastingTagEmoji(tag)} {tag}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </section>
   );
 }
@@ -210,14 +240,6 @@ function SavedNoteActions({
 }: SavedNoteActionsProps) {
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-      {(note.catalog_source || note.catalog_external_id) && (
-        <div className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-neutral-500">
-          {[note.catalog_source, note.catalog_external_id]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
-      )}
-
       <button
         className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60"
         disabled={deletingNoteId === note.id}
@@ -231,25 +253,51 @@ function SavedNoteActions({
 }
 
 type SavedNoteTagStackPanelProps = {
+  anchors: Record<TastingSectionKey, number>;
   noteId: string;
   tags: TastingNoteTags;
 };
 
+function SavedNotePanelAxis({
+  anchors,
+}: {
+  anchors: Record<TastingSectionKey, number>;
+}) {
+  return (
+    <div className="relative h-4">
+      {TASTING_SECTIONS.map((section) => (
+        <div
+          key={`saved-note-axis-${section.key}`}
+          className="absolute top-0 -translate-x-1/2 text-center"
+          style={{ left: `${anchors[section.key]}%` }}
+        >
+          <p className="text-[10px] tracking-[0.08em] text-neutral-500">
+            {section.title}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SavedNoteTagStackPanel({
+  anchors,
   noteId,
   tags,
 }: SavedNoteTagStackPanelProps) {
   return (
-    <div className="relative overflow-hidden rounded-[1.25rem] border border-black/8 bg-neutral-50 px-3 pb-3 pt-4">
-      <div className="pointer-events-none absolute inset-x-4 bottom-[3.35rem] h-px bg-black/10" />
-
-      <div className="grid grid-cols-3 gap-3">
-        {TASTING_SECTIONS.map((section) => (
-          <div
-            key={`${noteId}-stack-column-${section.key}`}
-            className="relative flex min-h-[14.5rem] flex-col justify-end"
-          >
-            <div className="flex min-h-[10.5rem] flex-col-reverse gap-2 pb-5">
+    <div className="relative min-h-[10.75rem] px-1">
+      {TASTING_SECTIONS.map((section) => (
+        <div
+          key={`${noteId}-stack-column-${section.key}`}
+          className="absolute bottom-0 -translate-x-1/2"
+          style={{
+            left: `${anchors[section.key]}%`,
+            width: "min(27%, 6rem)",
+          }}
+        >
+          <div className="flex min-h-[10.75rem] flex-col justify-end">
+            <div className="flex flex-1 flex-col-reverse gap-px">
               {tags[section.key].length === 0 && (
                 <span className="w-full rounded-[0.5rem] border border-dashed border-black/10 bg-white/80 px-2 py-2 text-center text-[11px] leading-4 text-neutral-400">
                   태그 없음
@@ -259,26 +307,20 @@ function SavedNoteTagStackPanel({
               {tags[section.key].map((tag) => (
                 <span
                   key={`${noteId}-stack-chip-${section.key}-${tag}`}
-                  className="w-full rounded-[0.5rem] border border-black/10 bg-white px-1 py-0.5 text-center text-xs leading-5 text-neutral-700 break-words"
+                  className="flex w-full items-center gap-1 overflow-hidden rounded-[0.5rem] border px-1.5 py-0.5 text-xs leading-5"
+                  style={getTastingTagStyle(tag, "stack")}
+                  title={tag}
                 >
-                  {tag}
+                  <span className="shrink-0">{getTastingTagEmoji(tag)}</span>
+                  <span className="min-w-0 truncate">
+                    {getTastingTagCompactLabel(tag)}
+                  </span>
                 </span>
               ))}
             </div>
-
-            <span className="mx-auto h-2.5 w-2.5 rounded-full border border-black/8 bg-white" />
-
-            <div className="pt-3 text-center">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                {section.title}
-              </p>
-              <p className="mt-1 text-[11px] text-neutral-400">
-                {tags[section.key].length} tags
-              </p>
-            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -298,15 +340,15 @@ function SavedNoteCard({
   const appearanceColor = parseAppearanceColor(note.appearance_color);
   const noteEnvelope = parseTastingEnvelope(note.envelope);
   const tags = parseTastingNoteTags(note.note_tags);
-  const envelopeSummary = getEnvelopeSummary(noteEnvelope);
+  const anchors = getTastingSectionAnchorPercentages();
 
   return (
     <article className="rounded-[1.75rem] border border-black/8 bg-neutral-50 p-5">
       <div className="flex flex-col gap-5 xl:flex-row">
         <div className="xl:w-[21rem] xl:min-w-[21rem]">
-          <div className="overflow-hidden rounded-[1.5rem] border border-black/8 bg-white">
-            <div className="border-b border-black/8 px-4 py-3">
-              <div className="inline-flex rounded-full border border-black/8 bg-neutral-50 p-1">
+          <div className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-3">
+            <div className="flex justify-center">
+              <div className="inline-flex rounded-full border border-black/8 bg-white/80 p-1">
                 {[
                   { key: "graph", label: "그래프" },
                   { key: "notes", label: "노트" },
@@ -327,16 +369,28 @@ function SavedNoteCard({
               </div>
             </div>
 
-            <div className="p-4">
+            <div className="mt-2.5 min-h-[10.75rem]">
               {activePanel === "graph" ? (
                 <TastingEnvelopeChart
                   appearanceColor={appearanceColor}
+                  className="h-[10.75rem]"
+                  showBottomAxis={false}
+                  showSectionLabels={false}
+                  surface="plain"
                   value={noteEnvelope}
                   variant="preview"
                 />
               ) : (
-                <SavedNoteTagStackPanel noteId={note.id} tags={tags} />
+                <SavedNoteTagStackPanel
+                  anchors={anchors}
+                  noteId={note.id}
+                  tags={tags}
+                />
               )}
+            </div>
+
+            <div className="mt-1.5">
+              <SavedNotePanelAxis anchors={anchors} />
             </div>
           </div>
         </div>
@@ -370,31 +424,13 @@ function SavedNoteCard({
               />
               와인 컬러 {appearanceColor.toUpperCase()}
             </span>
-            {envelopeSummary.map((item) => (
-              <span
-                key={`${note.id}-${item.label}`}
-                className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs text-neutral-600"
-              >
-                {item.label} {item.value}
-              </span>
-            ))}
           </div>
 
-          {(note.rating !== null || note.memo) && (
+          {note.memo && (
             <div className="mt-5 rounded-[1.25rem] border border-black/8 bg-white p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">
-                이전 기록 필드
+              <p className="whitespace-pre-wrap text-sm leading-6 text-neutral-700">
+                {note.memo}
               </p>
-              {note.rating !== null && (
-                <p className="mt-2 text-sm text-neutral-600">
-                  rating: {note.rating}
-                </p>
-              )}
-              {note.memo && (
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-600">
-                  {note.memo}
-                </p>
-              )}
             </div>
           )}
         </div>
@@ -426,12 +462,14 @@ export function NotesPage() {
     createDefaultTastingNoteTags(),
   );
   const [appearanceColor, setAppearanceColor] = useState(DEFAULT_APPEARANCE_COLOR);
+  const [memo, setMemo] = useState("");
   const [tagInputs, setTagInputs] = useState<TagInputMap>(createEmptyTagInputs());
 
   const deferredCatalogQuery = useDeferredValue(catalogQuery);
   const deferredNoteQuery = useDeferredValue(noteQuery);
   const normalizedCatalogQuery = deferredCatalogQuery.trim();
   const normalizedNoteQuery = deferredNoteQuery.trim().toLowerCase();
+  const appearanceGradient = getAppearanceGradientColors(appearanceColor);
   const selectedLabel = selectedWine ? getCatalogSelectionLabel(selectedWine) : "";
   const noteCountLabel = `${notes.length}개의 기록`;
   const filteredNotes = notes.filter((note) => {
@@ -569,6 +607,7 @@ export function NotesPage() {
         ? DEFAULT_APPEARANCE_COLOR
         : getCatalogSuggestedAppearanceColor(selectedWine),
     );
+    setMemo("");
     setTagInputs(createEmptyTagInputs());
     setMessage("");
 
@@ -634,7 +673,7 @@ export function NotesPage() {
 
     setNoteTags((current) => ({
       ...current,
-      [section]: Array.from(new Set([...current[section], ...candidates])),
+      [section]: mergeUniqueTags(current[section], candidates),
     }));
     setTagInputs((current) => ({
       ...current,
@@ -647,6 +686,21 @@ export function NotesPage() {
       ...current,
       [section]: current[section].filter((item) => item !== tag),
     }));
+  }
+
+  function handleToggleSuggestedTag(section: TastingSectionKey, tag: string) {
+    setNoteTags((current) => {
+      const exists = hasMatchingTag(current[section], tag);
+
+      return {
+        ...current,
+        [section]: exists
+          ? current[section].filter(
+              (item) => normalizeTagValue(item) !== normalizeTagValue(tag),
+            )
+          : mergeUniqueTags(current[section], [tag]),
+      };
+    });
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -672,7 +726,10 @@ export function NotesPage() {
       noteTags,
       appearanceColor,
     });
-    const { error } = await insertTastingNote(userId, payload);
+    const { error } = await insertTastingNote(userId, {
+      ...payload,
+      memo: memo.trim(),
+    });
 
     if (error) {
       setMessage(error.message);
@@ -872,7 +929,7 @@ export function NotesPage() {
 
       {isComposerOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/30 px-4 py-6 backdrop-blur-sm sm:px-6"
+          className="fixed inset-0 z-50 bg-black/30 px-4 py-3 backdrop-blur-sm sm:px-6 sm:py-4"
           onClick={handleCloseComposer}
         >
           <div className="flex min-h-full items-center justify-center">
@@ -880,20 +937,13 @@ export function NotesPage() {
               className="w-full max-w-5xl overflow-hidden rounded-[2rem] border border-black/8 bg-white shadow-[0_32px_120px_rgba(15,23,42,0.2)]"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="max-h-[calc(100vh-3rem)] overflow-y-auto">
+              <div className="flex h-[min(90vh,58rem)] max-h-[calc(100vh-1.5rem)] min-h-0 sm:min-h-[46rem] flex-col">
                 <div className="border-b border-black/8 bg-white px-6 py-5 sm:px-8">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                        New Note
-                      </p>
+                    <div>
                       <h2 className="text-3xl font-semibold text-neutral-950">
                         테이스팅 기록하기
                       </h2>
-                      <p className="max-w-2xl text-sm leading-6 text-neutral-600">
-                        카탈로그에서 병을 고른 뒤 엔벨로프와 태그를 저장하면,
-                        아래 기록 목록에 바로 추가됩니다.
-                      </p>
                     </div>
 
                     <button
@@ -907,30 +957,21 @@ export function NotesPage() {
                   </div>
                 </div>
 
-                <form className="px-6 py-6 sm:px-8 sm:py-8" onSubmit={handleSubmit}>
-                  <div className="space-y-6">
-                    <div className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-5">
-                      <label className="block">
-                        <span className="mb-2 block text-sm font-medium text-neutral-700">
-                          카탈로그에서 와인 선택
-                        </span>
-                        <input
-                          className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-lg text-neutral-950 outline-none placeholder:text-neutral-400 transition focus:border-neutral-400"
-                          placeholder="생산자, 와인 이름, 지역, 품종으로 검색"
-                          value={catalogQuery}
-                          onChange={(event) =>
-                            handleCatalogQueryChange(event.target.value)
-                          }
-                        />
-                      </label>
-                      <p className="mt-3 text-sm text-neutral-500">
-                        병을 직접 입력하는 대신, 카탈로그에서 선택한 와인을
-                        기준으로 기록이 저장됩니다.
-                      </p>
+                <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+                  <div className="relative z-20 shrink-0 border-b border-black/8 bg-white px-6 pb-4 pt-4 sm:px-8">
+                    <div className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-4">
+                      <input
+                        className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-lg text-neutral-950 outline-none placeholder:text-neutral-400 transition focus:border-neutral-400"
+                        placeholder="생산자, 와인 이름, 지역, 품종으로 검색"
+                        value={catalogQuery}
+                        onChange={(event) =>
+                          handleCatalogQueryChange(event.target.value)
+                        }
+                      />
                     </div>
 
                     {showCatalogResults && (
-                      <div className="rounded-[1.5rem] border border-black/8 bg-white shadow-[0_12px_32px_rgba(15,23,42,0.05)]">
+                      <div className="absolute inset-x-6 top-full z-30 mt-3 max-h-[min(42vh,24rem)] overflow-y-auto rounded-[1.25rem] border border-black/8 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.12)] sm:inset-x-8">
                         {isSearchingCatalog && (
                           <p className="px-4 py-4 text-sm text-neutral-500">
                             카탈로그를 검색하고 있어요...
@@ -977,153 +1018,142 @@ export function NotesPage() {
                         )}
                       </div>
                     )}
+                  </div>
 
-                    {selectedWine ? (
-                      <article className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-5">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.24em] text-neutral-500">
-                              선택한 와인
-                            </p>
-                            <h3 className="mt-2 text-2xl font-semibold text-neutral-950">
-                              {getCatalogTitle(selectedWine)}
-                            </h3>
-                            {getCatalogSubtitle(selectedWine) && (
-                              <p className="mt-2 text-sm font-medium text-neutral-600">
-                                {getCatalogSubtitle(selectedWine)}
-                              </p>
-                            )}
-                            <p className="mt-3 text-sm leading-6 text-neutral-600">
-                              {getCatalogMeta(selectedWine) || "추가 메타 정보 없음"}
-                            </p>
-                            {getCatalogReference(selectedWine) && (
-                              <p className="mt-2 text-xs text-neutral-400">
-                                {getCatalogReference(selectedWine)}
-                              </p>
-                            )}
-                          </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 sm:px-8 sm:py-8">
+                    <div className="space-y-6">
+                      {selectedWine && (
+                        <>
+                          <article className="rounded-[1.5rem] border border-black/8 bg-neutral-50 p-5">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <h3 className="text-2xl font-semibold text-neutral-950">
+                                  {getCatalogTitle(selectedWine)}
+                                </h3>
+                                {getCatalogSubtitle(selectedWine) && (
+                                  <p className="mt-2 text-sm font-medium text-neutral-600">
+                                    {getCatalogSubtitle(selectedWine)}
+                                  </p>
+                                )}
+                                {getCatalogMeta(selectedWine) && (
+                                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                                    {getCatalogMeta(selectedWine)}
+                                  </p>
+                                )}
+                              </div>
 
-                          <button
-                            className="rounded-full border border-black/10 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-white"
-                            onClick={handleResetSelection}
-                            type="button"
-                          >
-                            다른 와인 선택
-                          </button>
-                        </div>
-                      </article>
-                    ) : (
-                      <div className="rounded-[1.5rem] border border-dashed border-black/10 bg-neutral-50 p-5 text-sm leading-6 text-neutral-500">
-                        카탈로그에서 먼저 와인을 하나 선택해주세요. 선택된 병을
-                        기준으로 envelope과 태그가 저장됩니다.
-                      </div>
-                    )}
+                              <button
+                                className="rounded-full border border-black/10 px-3 py-1.5 text-sm font-medium text-neutral-700 transition hover:bg-white"
+                                onClick={handleResetSelection}
+                                type="button"
+                              >
+                                다른 와인 선택
+                              </button>
+                            </div>
+                          </article>
 
-                    <section className="rounded-[1.5rem] border border-black/8 bg-white p-5">
-                      <div className="space-y-2">
-                        <p className="text-sm font-semibold text-neutral-900">
-                          엔벨로프 편집
-                        </p>
-                        <p className="text-sm leading-6 text-neutral-500">
-                          aroma와 palate는 위아래로, finish는 위아래와 좌우로
-                          움직입니다. 위로 갈수록 강하고, finish는 오른쪽으로 갈수록
-                          길게 유지됩니다.
-                        </p>
-                      </div>
-
-                      <div className="mt-5">
-                        <TastingEnvelopeChart
-                          appearanceColor={appearanceColor}
-                          onChange={(nextValue) => setEnvelope(nextValue)}
-                          value={envelope}
-                        />
-                      </div>
-
-                      <div className="mt-5 rounded-[1.25rem] border border-black/8 bg-neutral-50 p-4">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-sm font-semibold text-neutral-900">
-                              와인 컬러 선택
-                            </p>
-                            <p className="mt-1 text-sm leading-6 text-neutral-500">
-                              그래프 아래 면적에 적용할 색을 골라주세요.
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            <input
-                              aria-label="와인 컬러 선택"
-                              className="h-12 w-16 cursor-pointer rounded-xl border border-black/10 bg-white p-1"
-                              type="color"
-                              value={appearanceColor}
-                              onChange={(event) =>
-                                setAppearanceColor(
-                                  parseAppearanceColor(event.target.value),
-                                )
-                              }
+                          <section className="rounded-[1.5rem] border border-black/8 bg-white p-5">
+                            <TastingEnvelopeChart
+                              appearanceColor={appearanceColor}
+                              onChange={(nextValue) => setEnvelope(nextValue)}
+                              value={envelope}
                             />
 
-                            <div className="min-w-[7rem]">
-                              <div
-                                className="h-6 rounded-full border border-black/10"
-                                style={{
-                                  background: `linear-gradient(90deg, ${appearanceColor} 0%, ${appearanceColor}cc 100%)`,
-                                }}
-                              />
-                              <p className="mt-2 text-xs text-neutral-500">
-                                {appearanceColor.toUpperCase()}
-                              </p>
+                            <div className="mt-5 rounded-[1.25rem] border border-black/8 bg-neutral-50 p-4">
+                              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                <p className="text-sm font-semibold text-neutral-900">
+                                  와인 컬러
+                                </p>
+
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    aria-label="와인 컬러 선택"
+                                    className="h-12 w-16 cursor-pointer rounded-xl border border-black/10 bg-white p-1"
+                                    type="color"
+                                    value={appearanceColor}
+                                    onChange={(event) =>
+                                      setAppearanceColor(
+                                        parseAppearanceColor(event.target.value),
+                                      )
+                                    }
+                                  />
+
+                                  <div className="min-w-[7rem]">
+                                    <div
+                                      className="h-6 rounded-full border border-black/10"
+                                      style={{
+                                        background: `linear-gradient(90deg, ${
+                                          appearanceGradient.base
+                                        } 0%, ${
+                                          appearanceGradient.isLight
+                                            ? "#ffffff"
+                                            : appearanceGradient.end
+                                        } 100%)`,
+                                      }}
+                                    />
+                                    <p className="mt-2 text-xs text-neutral-500">
+                                      {appearanceColor.toUpperCase()}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
+                          </section>
+
+                          <div className="grid gap-4 lg:grid-cols-3">
+                            {TASTING_SECTIONS.map((section) => (
+                              <SectionTagEditor
+                                key={section.key}
+                                inputValue={tagInputs[section.key]}
+                                onAddTag={handleAddTag}
+                                onChangeInput={handleTagInputChange}
+                                onRemoveTag={handleRemoveTag}
+                                onToggleSuggestedTag={handleToggleSuggestedTag}
+                                section={section.key}
+                                tags={noteTags[section.key]}
+                                title={section.title}
+                              />
+                            ))}
                           </div>
-                        </div>
-                      </div>
-                    </section>
 
-                    <div className="grid gap-4 lg:grid-cols-3">
-                      {TASTING_SECTIONS.map((section) => (
-                        <SectionTagEditor
-                          key={section.key}
-                          description={section.description}
-                          inputValue={tagInputs[section.key]}
-                          onAddTag={handleAddTag}
-                          onChangeInput={handleTagInputChange}
-                          onRemoveTag={handleRemoveTag}
-                          section={section.key}
-                          tags={noteTags[section.key]}
-                          title={section.title}
-                        />
-                      ))}
-                    </div>
+                          <section className="rounded-[1.5rem] border border-black/8 bg-white p-5">
+                            <textarea
+                              className="min-h-[6.5rem] w-full resize-none rounded-[1.1rem] border border-black/10 bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-950 outline-none transition focus:border-neutral-400"
+                              maxLength={240}
+                              placeholder="짧게 메모를 남겨보세요. 예: 산뜻하고 레몬 껍질 느낌, 피니시가 깔끔함"
+                              value={memo}
+                              onChange={(event) => setMemo(event.target.value)}
+                            />
+                            <p className="mt-2 text-xs text-neutral-400">
+                              {memo.trim().length}/240
+                            </p>
+                          </section>
 
-                    {message && (
-                      <p className="rounded-[1.25rem] border border-black/8 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
-                        {message}
-                      </p>
-                    )}
+                          {message && (
+                            <p className="rounded-[1.25rem] border border-black/8 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+                              {message}
+                            </p>
+                          )}
 
-                    <div className="flex flex-wrap items-center gap-3 border-t border-black/8 pt-2">
-                      <button
-                        className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold !text-white transition hover:bg-neutral-800 hover:!text-white focus-visible:!text-white active:!text-white disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={!selectedWine || isSaving}
-                        type="submit"
-                      >
-                        {isSaving ? "저장 중..." : "기록 저장"}
-                      </button>
+                          <div className="flex flex-wrap items-center gap-3 border-t border-black/8 pt-2">
+                            <button
+                              className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold !text-white transition hover:bg-neutral-800 hover:!text-white focus-visible:!text-white active:!text-white disabled:cursor-not-allowed disabled:opacity-60"
+                              disabled={!selectedWine || isSaving}
+                              type="submit"
+                            >
+                              {isSaving ? "저장 중..." : "기록 저장"}
+                            </button>
 
-                      <button
-                        className="rounded-2xl border border-black/10 px-5 py-3 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-50"
-                        onClick={() => resetDraft(false)}
-                        type="button"
-                      >
-                        envelope 초기화
-                      </button>
-
-                      <Link
-                        href="/discover"
-                        className="rounded-2xl border border-black/10 px-5 py-3 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-50"
-                      >
-                        와인 정보 다시 찾기
-                      </Link>
+                            <button
+                              className="rounded-2xl border border-black/10 px-5 py-3 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-50"
+                              onClick={() => resetDraft(false)}
+                              type="button"
+                            >
+                              envelope 초기화
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </form>

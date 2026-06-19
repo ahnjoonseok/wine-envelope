@@ -38,7 +38,13 @@ export type VerticalEnvelopePoint = {
   y: number;
 };
 
+export type FinishCurveHandle = {
+  x: number;
+  y: number;
+};
+
 export type FinishEnvelopePoint = {
+  curve: FinishCurveHandle;
   x: number;
   y: number;
 };
@@ -54,7 +60,11 @@ export type TastingNoteTags = Record<TastingSectionKey, string[]>;
 export const DEFAULT_TASTING_ENVELOPE: TastingEnvelope = {
   aroma: { y: 0.62 },
   palate: { y: 0.56 },
-  finish: { x: 0.5, y: 0.48 },
+  finish: {
+    curve: { x: 0.62, y: 0.48 },
+    x: 0.5,
+    y: 0,
+  },
 };
 
 export const DEFAULT_TASTING_NOTE_TAGS: TastingNoteTags = {
@@ -65,11 +75,20 @@ export const DEFAULT_TASTING_NOTE_TAGS: TastingNoteTags = {
 
 export const DEFAULT_APPEARANCE_COLOR = "#caa46b";
 
+type HexRgb = {
+  b: number;
+  g: number;
+  r: number;
+};
+
 export function createDefaultTastingEnvelope(): TastingEnvelope {
   return {
     aroma: { ...DEFAULT_TASTING_ENVELOPE.aroma },
     palate: { ...DEFAULT_TASTING_ENVELOPE.palate },
-    finish: { ...DEFAULT_TASTING_ENVELOPE.finish },
+    finish: {
+      ...DEFAULT_TASTING_ENVELOPE.finish,
+      curve: { ...DEFAULT_TASTING_ENVELOPE.finish.curve },
+    },
   };
 }
 
@@ -85,6 +104,45 @@ function isHexColor(value: string) {
   return /^#[0-9a-f]{6}$/i.test(value.trim());
 }
 
+function hexToRgb(value: string): HexRgb {
+  const normalized = value.replace("#", "");
+
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex({ r, g, b }: HexRgb) {
+  return `#${[r, g, b]
+    .map((channel) =>
+      Math.max(0, Math.min(255, Math.round(channel)))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+function mixHexColors(base: string, target: string, amount: number) {
+  const clampedAmount = Math.max(0, Math.min(1, amount));
+  const baseRgb = hexToRgb(base);
+  const targetRgb = hexToRgb(target);
+
+  return rgbToHex({
+    r: baseRgb.r + (targetRgb.r - baseRgb.r) * clampedAmount,
+    g: baseRgb.g + (targetRgb.g - baseRgb.g) * clampedAmount,
+    b: baseRgb.b + (targetRgb.b - baseRgb.b) * clampedAmount,
+  });
+}
+
+function isLightAppearanceColor(value: string) {
+  const { r, g, b } = hexToRgb(value);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+
+  return luminance >= 0.78;
+}
+
 export function parseAppearanceColor(value: unknown): string {
   if (typeof value !== "string") {
     return DEFAULT_APPEARANCE_COLOR;
@@ -92,6 +150,27 @@ export function parseAppearanceColor(value: unknown): string {
 
   const normalized = value.trim().toLowerCase();
   return isHexColor(normalized) ? normalized : DEFAULT_APPEARANCE_COLOR;
+}
+
+export function getAppearanceGradientColors(value: unknown) {
+  const color = parseAppearanceColor(value);
+  const isLight = isLightAppearanceColor(color);
+
+  if (isLight) {
+    return {
+      base: color,
+      end: color,
+      isLight,
+      start: "#ffffff",
+    };
+  }
+
+  return {
+    base: color,
+    end: mixHexColors(color, "#18212f", 0.72),
+    isLight,
+    start: mixHexColors(color, "#ffffff", 0.06),
+  };
 }
 
 export type WineCatalogEntry = Record<string, unknown> & {
@@ -191,6 +270,11 @@ export function parseTastingEnvelope(value: unknown): TastingEnvelope {
   const aroma = isRecord(value.aroma) ? value.aroma : {};
   const palate = isRecord(value.palate) ? value.palate : {};
   const finish = isRecord(value.finish) ? value.finish : {};
+  const finishCurve = isRecord(finish.curve) ? finish.curve : {};
+  const finishY = clampUnit(
+    typeof finish.y === "number" ? finish.y : Number(finish.y),
+    DEFAULT_TASTING_ENVELOPE.finish.y,
+  );
 
   return {
     aroma: {
@@ -206,14 +290,25 @@ export function parseTastingEnvelope(value: unknown): TastingEnvelope {
       ),
     },
     finish: {
+      curve: {
+        x: clampUnit(
+          typeof finishCurve.x === "number"
+            ? finishCurve.x
+            : Number(finishCurve.x),
+          DEFAULT_TASTING_ENVELOPE.finish.curve.x,
+        ),
+        y: clampUnit(
+          typeof finishCurve.y === "number"
+            ? finishCurve.y
+            : Number(finishCurve.y),
+          finishY,
+        ),
+      },
       x: clampUnit(
         typeof finish.x === "number" ? finish.x : Number(finish.x),
         DEFAULT_TASTING_ENVELOPE.finish.x,
       ),
-      y: clampUnit(
-        typeof finish.y === "number" ? finish.y : Number(finish.y),
-        DEFAULT_TASTING_ENVELOPE.finish.y,
-      ),
+      y: finishY,
     },
   };
 }
